@@ -1,0 +1,95 @@
+# CI on every PR + push to main.
+#
+# The embedded capnp.wasm is architecture-independent and is NOT committed to
+# git, so we build it once (needs cmake + wasi-sdk) and share it as an artifact
+# with every platform job. This is the same artifact the release workflow bundles
+# into the published crate.
+
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-wasm:
+    name: Build capnp.wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Build embedded wasm
+        run: capnpc-embedded/ci/build-wasm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets/capnp.wasm
+          retention-days: 7
+
+  test:
+    name: ${{ matrix.os }} (${{ matrix.label }})
+    needs: build-wasm
+    runs-on: ${{ matrix.os }}
+    # Windows is not yet supported (the WASI runner preopens `/` and uses Unix
+    # absolute paths); keep it visible but non-blocking until that's fixed.
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: aarch64-apple-darwin
+          - os: macos-15-intel
+            label: x86_64-apple-darwin
+          - os: ubuntu-latest
+            label: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            label: x86_64-pc-windows-msvc
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download embedded wasm
+        uses: actions/download-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.label }}
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+  # Alpine/musl — the classic native-binary breakage that this crate avoids.
+  # This is the payoff of the WASM approach, so it gets its own gate.
+  test-musl:
+    name: alpine-musl (aarch64)
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    container: rust:alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download embedded wasm
+        uses: actions/download-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets
+      - run: apk add --no-cache musl-dev
+      - run: cargo test --workspace --all-targets

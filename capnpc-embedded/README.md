@@ -1,5 +1,9 @@
 # capnpc-embedded
 
+[![crates.io](https://img.shields.io/crates/v/capnpc-embedded.svg)](https://crates.io/crates/capnpc-embedded)
+[![docs.rs](https://img.shields.io/docsrs/capnpc-embedded)](https://docs.rs/capnpc-embedded)
+[![CI](https://github.com/rickardp/capnpc-embedded-rust/actions/workflows/test.yml/badge.svg)](https://github.com/rickardp/capnpc-embedded-rust/actions/workflows/test.yml)
+
 Compile Cap'n Proto schemas from your `build.rs` with **no system `capnp`
 installation** and **no C/C++ toolchain** — only a Rust toolchain.
 
