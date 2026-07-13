@@ -25,10 +25,13 @@ include = [
 [dependencies]
 capnpc = "0.20"
 capnp = "0.20"
-# WASM engine. wasmtime is proven; a leaner wasmi-based runner is a planned
-# follow-up (see PLAN.md). Threads feature is required: kj emits atomic ops.
-wasmtime = { version = "28", default-features = false, features = ["cranelift", "runtime", "threads"] }
-wasmtime-wasi = "28"
+# WASM engine: wasmi is a pure-Rust interpreter — a lean build-dependency tree
+# and fast to compile, adequate for build-time schema compilation. The embedded
+# capnp.wasm is a plain MVP module (no exceptions, no atomics), so no engine
+# feature flags are needed.
+wasmi = "1.1"
+wasmi_wasi = "1.1"
+cap-std = "3"
 tempfile = "3"
 anyhow = "1"
 

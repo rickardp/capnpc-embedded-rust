@@ -1,13 +1,14 @@
-//! Runs the embedded `capnp.wasm` in-process via wasmtime and returns the raw
-//! `CodeGeneratorRequest` it writes to stdout.
+//! Runs the embedded `capnp.wasm` in-process via the wasmi interpreter and
+//! returns the raw `CodeGeneratorRequest` it writes to stdout.
 
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use wasmtime::{Config, Engine, Linker, Module, Store};
-use wasmtime_wasi::pipe::MemoryOutputPipe;
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
+use cap_std::ambient_authority;
+use cap_std::fs::Dir;
+use wasmi::{Config, Engine, Linker, Module, Store};
+use wasmi_wasi::wasi_common::pipe::WritePipe;
+use wasmi_wasi::{WasiCtx, WasiCtxBuilder};
 
 use crate::{CompileCommand, STD_SCHEMAS};
 
@@ -55,48 +56,55 @@ pub(crate) fn run_capnp(cmd: &CompileCommand) -> Result<Vec<u8>> {
     }
 
     // Capture stdout (the CodeGeneratorRequest).
-    let stdout = MemoryOutputPipe::new(64 * 1024 * 1024);
+    let stdout = WritePipe::new_in_memory();
 
+    // Preopen the host root read-only (see the doc comment above for why).
+    let root = Dir::open_ambient_dir("/", ambient_authority())
+        .context("failed to open filesystem root for the capnp compiler")?;
     let mut builder = WasiCtxBuilder::new();
     builder
-        .stdout(stdout.clone())
+        .stdout(Box::new(stdout.clone()))
         .inherit_stderr()
         .env("PWD", "/")
+        .context("failed to set environment for the capnp compiler")?
         .args(&args)
-        .preopened_dir("/", "/", DirPerms::READ, FilePerms::READ)
+        .context("failed to set arguments for the capnp compiler")?
+        .preopened_dir(root, "/")
         .context("failed to preopen filesystem root for the capnp compiler")?;
-    let wasi: WasiP1Ctx = builder.build_p1();
+    let wasi: WasiCtx = builder.build();
 
-    let mut config = Config::new();
-    config.wasm_backtrace(true);
-    config.wasm_threads(true); // kj emits atomic ops even single-threaded
-    let engine = Engine::new(&config).context("failed to create wasm engine")?;
-    let module =
-        Module::from_binary(&engine, CAPNP_WASM).context("failed to load embedded capnp.wasm")?;
+    let engine = Engine::new(&Config::default());
+    let module = Module::new(&engine, CAPNP_WASM).context("failed to load embedded capnp.wasm")?;
 
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
-    preview1::add_to_linker_sync(&mut linker, |t| t)?;
+    let mut linker: Linker<WasiCtx> = Linker::new(&engine);
+    wasmi_wasi::add_to_linker(&mut linker, |ctx| ctx)
+        .map_err(|e| anyhow!("failed to link WASI: {e}"))?;
 
     let mut store = Store::new(&engine, wasi);
-    let instance = linker.instantiate(&mut store, &module)?;
-    let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
+    let instance = linker
+        .instantiate_and_start(&mut store, &module)
+        .map_err(|e| anyhow!("failed to instantiate capnp.wasm: {e}"))?;
+    let start = instance.get_typed_func::<(), ()>(&store, "_start")?;
 
-    // WASI `_start` ends by calling `proc_exit`, surfaced as an `I32Exit` error.
+    // WASI `_start` ends by calling `proc_exit`, surfaced as an error carrying
+    // the exit code.
     if let Err(e) = start.call(&mut store, ()) {
-        match e.downcast_ref::<wasmtime_wasi::I32Exit>() {
-            Some(exit) if exit.0 == 0 => {}
-            Some(exit) => {
+        match e.i32_exit_status() {
+            Some(0) => {}
+            Some(code) => {
                 return Err(anyhow!(
-                    "capnp compiler exited with code {} (see stderr above)",
-                    exit.0
+                    "capnp compiler exited with code {code} (see stderr above)"
                 ))
             }
-            None => return Err(e.context("capnp compiler trapped")),
+            None => return Err(anyhow!("capnp compiler trapped: {e}")),
         }
     }
 
     drop(store);
-    let bytes = stdout.contents().to_vec();
+    let bytes = stdout
+        .try_into_inner()
+        .map_err(|_| anyhow!("stdout pipe still had other references"))?
+        .into_inner();
     if bytes.is_empty() {
         return Err(anyhow!(
             "capnp compiler produced no output; see stderr above for schema errors"

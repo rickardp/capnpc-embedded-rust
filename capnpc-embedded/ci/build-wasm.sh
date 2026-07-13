@@ -50,7 +50,7 @@ cmake -S "$src" -B "$build" -G "Unix Makefiles" \
   -DWASI_SDK_PREFIX="$WASI_SDK" \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
   -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF -DWITH_FIBERS=OFF \
-  -DCMAKE_CXX_FLAGS="-D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS -DKJ_NO_EXCEPTIONS=1 -fno-exceptions" \
+  -DCMAKE_CXX_FLAGS="-D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS -DKJ_NO_EXCEPTIONS=1 -fno-exceptions -Xclang -target-feature -Xclang -atomics" \
   -DCMAKE_EXE_LINKER_FLAGS="-lwasi-emulated-signal -lwasi-emulated-mman -lwasi-emulated-process-clocks -Wl,-z,stack-size=4194304 -Wl,--initial-memory=33554432"
 
 echo ">> building capnp_tool"
