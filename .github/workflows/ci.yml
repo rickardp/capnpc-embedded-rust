@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Verify the crate + the embedded wasm work across libc/arch combinations —
+  # the axes that break native binaries. Same committed capnp.wasm everywhere.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: linux-glibc-x64 }
+          - { os: macos-latest,   name: macos-arm64 }
+          - { os: windows-latest, name: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    name: test-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets
+
+  # Alpine/musl — the classic native-binary breakage that this crate avoids.
+  test-musl:
+    runs-on: ubuntu-latest
+    name: test-alpine-musl
+    container: rust:alpine
+    steps:
+      - uses: actions/checkout@v4
+      - run: apk add --no-cache musl-dev
+      - run: cargo test --workspace --all-targets
+
+  # Rebuild the wasm from the vendored patch and confirm it still passes tests.
+  # (Does not commit; that happens via the release-watch PR.)
+  rebuild-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - uses: dtolnay/rust-toolchain@stable
+      - run: capnpc-embedded/ci/build-wasm.sh
+      - run: cargo test -p capnpc-embedded

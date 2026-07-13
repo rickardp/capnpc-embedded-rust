@@ -1,0 +1,44 @@
+name: Watch capnproto releases
+
+# Dependabot can't track upstream capnproto release tags, so this weekly job does.
+# When capnproto ships a newer release than we bundle, it opens an issue so a
+# maintainer can bump CAPNP_VERSION, run ci/build-wasm.sh, and cut a new release
+# (remember: bump the crate's SemVer, not just the +metadata).
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare bundled vs latest capnproto
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bundled="$(grep -oE 'CAPNP_VERSION:-[0-9.]+' capnpc-embedded/ci/build-wasm.sh | head -1 | cut -d- -f3)"
+          latest="$(gh api repos/capnproto/capnproto/releases/latest --jq .tag_name | sed 's/^v//')"
+          echo "bundled=$bundled latest=$latest"
+          if [ "$bundled" = "$latest" ]; then
+            echo "up to date"; exit 0
+          fi
+          title="Bundle Cap'n Proto $latest (currently $bundled)"
+          if gh issue list --state open --search "$title in:title" | grep -q .; then
+            echo "issue already open"; exit 0
+          fi
+          gh issue create --title "$title" --body \
+            "capnproto **$latest** is available; capnpc-embedded bundles **$bundled**.
+
+            To update:
+            1. Set \`CAPNP_VERSION=$latest\` in \`capnpc-embedded/ci/build-wasm.sh\`.
+            2. Port \`vendor/wasi-$bundled.patch\` to \`vendor/wasi-$latest.patch\`.
+            3. Run \`capnpc-embedded/ci/build-wasm.sh\` and commit the new \`assets/capnp.wasm\`.
+            4. Refresh \`assets/capnp-include/capnp/rust.capnp\` if capnpc-rust changed it.
+            5. Bump the crate version's **SemVer** (left of \`+\`) and set metadata to \`+$latest\`."

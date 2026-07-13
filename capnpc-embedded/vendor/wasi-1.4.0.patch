@@ -1,0 +1,287 @@
+--- a/src/kj/exception.c++	2026-03-12 14:59:55
++++ b/src/kj/exception.c++	2026-07-13 16:15:34
+@@ -596,6 +596,7 @@
+ }
+ 
+ #else
++#if !defined(__wasi__)
+ namespace {
+ 
+ [[noreturn]] void crashHandler(int signo, siginfo_t* info, void* context) {
+@@ -627,7 +628,13 @@
+ }
+ 
+ }  // namespace
++#endif  // !__wasi__
+ 
++#if defined(__wasi__)
++void printStackTraceOnCrash() {
++  // WASI has no POSIX signals; crash-handler is a no-op.
++}
++#else
+ void printStackTraceOnCrash() {
+   // Set up alternate signal stack so that stack overflows can be handled.
+   stack_t stack;
+@@ -675,6 +682,7 @@
+   std::set_terminate(&terminateHandler);
+ #endif
+ }
++#endif  // __wasi__
+ #endif
+ 
+ kj::StringPtr trimSourceFilename(kj::StringPtr filename) {
+@@ -728,7 +736,9 @@
+ }
+ 
+ void resetCrashHandlers() {
+-#ifndef _WIN32
++#if defined(__wasi__)
++  // WASI has no sigaction.
++#elif !defined(_WIN32)
+   struct sigaction action;
+   memset(&action, 0, sizeof(action));
+ 
+@@ -927,7 +937,9 @@
+ }
+ 
+ void Exception::addTraceHere() {
+-#if __GNUC__
++#if defined(__wasi__)
++  // WebAssembly lacks __builtin_return_address; skip stack trace capture.
++#elif __GNUC__
+   addTrace(__builtin_return_address(0));
+ #elif _MSC_VER
+   addTrace(_ReturnAddress());
+--- a/src/kj/miniposix.h	2026-03-12 14:59:55
++++ b/src/kj/miniposix.h	2026-07-13 16:13:50
+@@ -107,6 +107,14 @@
+   return ::_mkdir(path);
+ }
+ 
++#elif defined(__wasi__)
++// WASI has no pipe(); mkdir takes a mode.
++inline int pipe(int fds[2]) { errno = ENOSYS; return -1; }
++using ::mkdir;
++static constexpr inline size_t iovMax() {
++  return 1024;  // WASI-libc UIO_MAXIOV
++}
++
+ #else
+ // We're on real POSIX.
+ 
+--- a/src/kj/thread.c++	2026-03-12 14:59:55
++++ b/src/kj/thread.c++	2026-07-13 16:14:12
+@@ -27,8 +27,10 @@
+ #include "windows-sanity.h"
+ #else
+ #include <pthread.h>
++#if !defined(__wasi__)
+ #include <signal.h>
+ #endif
++#endif
+ 
+ namespace kj {
+ 
+@@ -93,10 +95,14 @@
+ }
+ 
+ void Thread::sendSignal(int signo) {
++#if defined(__wasi__)
++  KJ_UNIMPLEMENTED("sendSignal not supported on WASI");
++#else
+   int pthreadResult = pthread_kill(*reinterpret_cast<pthread_t*>(&threadId), signo);
+   if (pthreadResult != 0) {
+     KJ_FAIL_SYSCALL("pthread_kill", pthreadResult) { break; }
+   }
++#endif
+ }
+ 
+ void Thread::detach() {
+--- a/src/kj/test-helpers.c++	2026-03-12 14:59:55
++++ b/src/kj/test-helpers.c++	2026-07-13 16:16:51
+@@ -26,8 +26,11 @@
+ #include "test.h"
+ 
+ #include <string.h>
+-#ifndef _WIN32
++#if defined(__wasi__)
++// WASI: no fork/wait, but unistd provides _exit
+ #include <unistd.h>
++#elif !defined(_WIN32)
++#include <unistd.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+ #else
+@@ -120,8 +123,8 @@
+ 
+ bool expectFatalThrow(kj::Maybe<Exception::Type> type, kj::Maybe<StringPtr> message,
+                       Function<void()> code) {
+-#if _WIN32
+-  // We don't support death tests on Windows due to lack of efficient fork.
++#if _WIN32 || defined(__wasi__)
++  // No efficient fork() on Windows / WASI; death tests unsupported.
+   return true;
+ #else
+   pid_t child;
+@@ -154,8 +157,8 @@
+ }
+ 
+ bool expectExit(Maybe<int> statusCode, FunctionParam<void()> code)  noexcept {
+-#if _WIN32
+-  // We don't support death tests on Windows due to lack of efficient fork.
++#if _WIN32 || defined(__wasi__)
++  // No efficient fork() on Windows / WASI; death tests unsupported.
+   return true;
+ #else
+   pid_t child;
+@@ -189,8 +192,8 @@
+ 
+ 
+ bool expectSignal(Maybe<int> signal, FunctionParam<void()> code) noexcept {
+-#if _WIN32
+-  // We don't support death tests on Windows due to lack of efficient fork.
++#if _WIN32 || defined(__wasi__)
++  // No efficient fork() on Windows / WASI; death tests unsupported.
+   return true;
+ #else
+   pid_t child;
+--- a/src/kj/filesystem-disk-unix.c++	2026-03-12 14:59:55
++++ b/src/kj/filesystem-disk-unix.c++	2026-07-13 16:52:15
+@@ -51,6 +51,20 @@
+ #include <syscall.h>
+ #include <linux/fs.h>
+ #include <sys/sendfile.h>
++#endif
++
++#if defined(__wasi__)
++// WASI lacks several POSIX facilities; provide stubs. These code paths are not
++// exercised by read-only schema compilation.
++static inline int dup(int) { errno = ENOSYS; return -1; }
++static inline int mknodat(int, const char*, mode_t, dev_t) { errno = ENOSYS; return -1; }
++#ifndef MS_ASYNC
++#define MS_ASYNC 1
++#define MS_SYNC 4
++#endif
++// msync/getpid are declared by wasi-libc but not implemented; define them.
++extern "C" int msync(void*, size_t, int) { return 0; }
++extern "C" pid_t getpid(void) { return 1; }
+ #endif
+ 
+ namespace kj {
+@@ -1664,6 +1678,7 @@
+       : root(openDir("/")),
+         current(openDir(".")),
+         currentPath(computeCurrentPath()) {
++#if !defined(__wasi__)
+     // We sometimes like to use qemu-user to test arm64 binaries cross-compiled from an x64 host
+     // machine. But, because it intercepts and rewrites system calls from userspace rather than
+     // emulating a whole kernel, it has a lot of quirks. One quirk that hits kj::Filesystem pretty
+@@ -1681,6 +1696,7 @@
+       KJ_LOG(WARNING, "root dir file descriptor is broken, probably because of qemu; compensating");
+       root.setFd(openDir("/dev/.."));
+     }
++#endif  // !__wasi__
+   }
+ 
+   const Directory& getRoot() const override {
+@@ -1720,6 +1736,11 @@
+   }
+ 
+   static Path computeCurrentPath() {
++#if defined(__wasi__)
++    // WASI has no getcwd()/cwd concept: the current directory is the preopened
++    // directory, which we label as the root path.
++    return Path(nullptr);
++#else
+     // If env var PWD is set and points to the current directory, use it. This captures the current
+     // path according to the user's shell, which may differ from the kernel's idea in the presence
+     // of symlinks.
+@@ -1774,6 +1795,7 @@
+     KJ_ASSERT(path.startsWith("/"), "current directory is not absolute", path);
+ 
+     return Path::parse(path.slice(1));
++#endif
+   }
+ };
+ 
+--- a/src/capnp/message.h	2026-03-12 14:59:55
++++ b/src/capnp/message.h	2026-07-13 16:18:36
+@@ -127,7 +127,7 @@
+ private:
+   ReaderOptions options;
+ 
+-#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && (defined(__ppc__) || defined(__i386__)))
++#if defined(__EMSCRIPTEN__) || defined(__wasi__) || (defined(__APPLE__) && (defined(__ppc__) || defined(__i386__)))
+   static constexpr size_t arenaSpacePadding = 19;
+ #else
+   static constexpr size_t arenaSpacePadding = 18;
+--- a/src/capnp/compiler/parser.c++	2026-03-12 14:59:55
++++ b/src/capnp/compiler/parser.c++	2026-07-13 16:32:35
+@@ -31,6 +31,9 @@
+ #if !_MSC_VER
+ #include <unistd.h>
+ #endif
++#if defined(__wasi__)
++#include <sys/random.h>  // getentropy
++#endif
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <fcntl.h>
+@@ -48,7 +51,11 @@
+ uint64_t generateRandomId() {
+   uint64_t result;
+ 
+-#if _WIN32
++#if defined(__wasi__)
++  // WASI provides entropy via getentropy() (the random_get syscall); no /dev/urandom.
++  KJ_ASSERT(getentropy(&result, sizeof(result)) == 0);
++
++#elif _WIN32
+   HCRYPTPROV handle;
+   KJ_ASSERT(CryptAcquireContextW(&handle, nullptr, nullptr,
+                                  PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_SILENT));
+--- a/src/capnp/compiler/capnp.c++	2026-03-12 14:59:55
++++ b/src/capnp/compiler/capnp.c++	2026-07-13 16:20:58
+@@ -62,7 +62,7 @@
+ #include <windows.h>
+ #include <kj/windows-sanity.h>
+ #undef CONST
+-#else
++#elif !defined(__wasi__)
+ #include <sys/wait.h>
+ #endif
+ 
+@@ -530,6 +530,14 @@
+         continue;
+       }
+ 
++#if defined(__wasi__)
++      // WASI cannot fork/exec plugin subprocesses. Only the "-" (stdout) output
++      // mode is supported, which is what capnpc-rust uses.
++      KJ_FAIL_REQUIRE(
++          "On WASI, only the '-o-' (write CodeGeneratorRequest to stdout) output "
++          "mode is supported; external code-generator plugins cannot be run.",
++          output.name);
++#else
+       int pipeFds[2];
+       KJ_SYSCALL(kj::miniposix::pipe(pipeFds));
+ 
+@@ -670,6 +678,7 @@
+         context.error(kj::str(output.name, ": plugin failed: exit code ", WEXITSTATUS(status)));
+       }
+ #endif  // _WIN32, else
++#endif  // __wasi__
+     }
+ 
+     return true;
+--- a/src/capnp/CMakeLists.txt	2026-03-12 14:59:55
++++ b/src/capnp/CMakeLists.txt	2026-07-13 16:19:51
+@@ -129,7 +129,7 @@
+ if(NOT CAPNP_LITE)
+   add_library(capnp-json ${capnp-json_sources})
+   add_library(CapnProto::capnp-json ALIAS capnp-json)
+-  target_link_libraries(capnp-json PUBLIC capnp kj-async kj)
++  target_link_libraries(capnp-json PUBLIC capnp kj)
+   # Ensure the library has a version set to match autotools build
+   set_target_properties(capnp-json PROPERTIES VERSION ${VERSION})
+   install(TARGETS capnp-json ${INSTALL_TARGETS_DEFAULT_ARGS})

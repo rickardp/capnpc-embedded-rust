@@ -1,0 +1,36 @@
+[package]
+name = "capnpc-embedded"
+# Version scheme: <our-semver>+<bundled-capnproto-version>.
+# The build metadata (after `+`) is informational only — Cargo ignores it for
+# resolution, so every release MUST bump the left (SemVer) side. See README.
+version = "0.1.0+1.4.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Compile Cap'n Proto schemas in build.rs with no system capnp and no C/C++ toolchain — the capnp compiler is embedded as WebAssembly and run in-process."
+repository = "https://github.com/rickardp/capnpc-embedded-rust"
+documentation = "https://docs.rs/capnpc-embedded"
+readme = "README.md"
+keywords = ["capnp", "capnproto", "codegen", "build-dependencies", "wasm"]
+categories = ["development-tools::build-utils", "encoding"]
+# Ship only what's needed; exclude the vendored C++ sources from the published crate.
+include = [
+    "src/**/*.rs",
+    "assets/capnp.wasm",
+    "assets/capnp-include/**/*.capnp",
+    "README.md",
+    "LICENSE",
+]
+
+[dependencies]
+capnpc = "0.20"
+capnp = "0.20"
+# WASM engine. wasmtime is proven; a leaner wasmi-based runner is a planned
+# follow-up (see PLAN.md). Threads feature is required: kj emits atomic ops.
+wasmtime = { version = "28", default-features = false, features = ["cranelift", "runtime", "threads"] }
+wasmtime-wasi = "28"
+tempfile = "3"
+anyhow = "1"
+
+[dev-dependencies]
+capnp = "0.20"
