@@ -6,9 +6,25 @@ on:
   pull_request:
 
 jobs:
-  # Verify the crate + the embedded wasm work across libc/arch combinations —
-  # the axes that break native binaries. Same committed capnp.wasm everywhere.
+  # Build the (architecture-independent) wasm ONCE from the vendored patch and
+  # share it with every downstream job. This is the same artifact that the
+  # release pipeline bundles into the published crate.
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - run: capnpc-embedded/ci/build-wasm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets/capnp.wasm
+          retention-days: 7
+
+  # Verify the crate works across the libc/arch combinations that break native
+  # binaries. Same wasm everywhere, downloaded from the build-wasm job.
   test:
+    needs: build-wasm
     strategy:
       fail-fast: false
       matrix:
@@ -20,27 +36,25 @@ jobs:
     name: test-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets
 
-  # Alpine/musl — the classic native-binary breakage that this crate avoids.
+  # Alpine/musl — the classic native-binary breakage this crate avoids.
   test-musl:
+    needs: build-wasm
     runs-on: ubuntu-latest
     name: test-alpine-musl
     container: rust:alpine
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: capnp-wasm
+          path: capnpc-embedded/assets
       - run: apk add --no-cache musl-dev
       - run: cargo test --workspace --all-targets
-
-  # Rebuild the wasm from the vendored patch and confirm it still passes tests.
-  # (Does not commit; that happens via the release-watch PR.)
-  rebuild-wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y cmake
-      - uses: dtolnay/rust-toolchain@stable
-      - run: capnpc-embedded/ci/build-wasm.sh
-      - run: cargo test -p capnpc-embedded

@@ -56,17 +56,23 @@ Standalone repo, versioned `X.Y.Z+<capnp-version>` (e.g. `0.1.0+1.4.0`):
 ```
 capnpc-embedded/
   Cargo.toml
-  build.rs                 # optional: nothing to compile; wasm is prebuilt
-  src/lib.rs               # pub fn generate(schema_files, out_dir) -> Result<()>
-  assets/capnp.wasm        # prebuilt, include_bytes!'d (~3.2 MB, ~1.5 MB gz)
-  vendor/                  # pruned capnproto C++ source + our wasi patch set
-  ci/build-wasm.sh         # reproduces assets/capnp.wasm with wasi-sdk (see SPIKE-RESULTS)
+  build.rs                 # errors clearly if capnp.wasm hasn't been produced
+  src/lib.rs               # CompileCommand API + in-process wasm runner
+  assets/capnp.wasm        # generated (gitignored); include_bytes!'d (~3.2 MB)
+  assets/capnp-include/    # bundled standard schemas (schema/c++/rust.capnp, ...)
+  patches/wasi-<ver>.patch # our ~9-file __wasi__ diff (NOT vendored capnp source)
+  ci/build-wasm.sh         # fetches pristine capnp, applies patch, builds the wasm
   README.md
 ```
 
-The wasm is **committed** (or attached to releases and fetched by our release
-process — never by the consumer). The vendored patched source + `ci/build-wasm.sh`
-make the artifact reproducible and auditable.
+We do **not** vendor the capnproto crate or its C++ source. `build-wasm.sh`
+downloads the pristine upstream release at build time and applies only
+`patches/wasi-<ver>.patch` on top — a sibling/companion, not a fork.
+
+The wasm is **not committed to git**. It is produced by our release pipeline
+before `cargo publish` and ships inside the published `.crate`, so consumers get
+it prebuilt and never run wasi-sdk/cmake themselves. (Ideal end state: upstream
+the patch so we build straight from an unmodified release.)
 
 ## Downstream usage
 

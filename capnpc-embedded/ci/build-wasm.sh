@@ -40,7 +40,7 @@ curl -fsSL "https://github.com/capnproto/capnproto/archive/refs/tags/v${CAPNP_VE
 src="$work/capnproto-${CAPNP_VERSION}/c++"
 
 echo ">> applying WASI patch"
-patch -p1 -d "$src" < "$here/vendor/wasi-${CAPNP_VERSION}.patch"
+patch -p1 -d "$src" < "$here/patches/wasi-${CAPNP_VERSION}.patch"
 
 # --- build --------------------------------------------------------------------
 echo ">> configuring (cmake + wasi-sdk)"

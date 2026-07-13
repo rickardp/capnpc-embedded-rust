@@ -1,0 +1,25 @@
+name: Release
+
+# Produces the wasm, then publishes to crates.io so the prebuilt binary ships
+# inside the .crate. The wasm is never committed to git; it exists only in the
+# published artifact. Trigger by pushing a tag like `v0.1.0`.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build embedded wasm
+        run: capnpc-embedded/ci/build-wasm.sh
+      - name: Verify before publishing
+        run: cargo test -p capnpc-embedded
+      - name: Publish (wasm is picked up by the `include` list)
+        run: cargo publish -p capnpc-embedded --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

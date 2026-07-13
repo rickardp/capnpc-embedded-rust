@@ -80,11 +80,25 @@ breaking way (or an API break) is a breaking bump.
 
 ## How the wasm is built
 
-`assets/capnp.wasm` is produced by `ci/build-wasm.sh`, which downloads the pinned
-capnproto release, applies a small `__wasi__`-guarded patch
-(`vendor/wasi-<version>.patch`, ~9 files), and builds with wasi-sdk + CMake to
-`wasm32-wasip1`. The compiler is built without C++ exceptions
-(`-fno-exceptions`), so the result is a plain MVP wasm that runs on any engine.
+`assets/capnp.wasm` is **generated, not committed to git**. `ci/build-wasm.sh`
+downloads the pinned *pristine* capnproto release, applies a small
+`__wasi__`-guarded patch (`patches/wasi-<version>.patch`, ~9 files), and builds
+with wasi-sdk + CMake to `wasm32-wasip1`. The compiler is built without C++
+exceptions (`-fno-exceptions`), so the result is a plain MVP wasm that runs on
+any engine.
+
+We do not vendor capnproto's source — only that patch. The release pipeline runs
+`build-wasm.sh` before `cargo publish`, so the published crate on crates.io
+already contains the prebuilt wasm; **consumers never run wasi-sdk or cmake.**
+
+## Developing
+
+The wasm isn't in git, so a fresh checkout must produce it once:
+
+```sh
+capnpc-embedded/ci/build-wasm.sh   # needs cmake; downloads wasi-sdk
+cargo test
+```
 
 ## Limitations
 
