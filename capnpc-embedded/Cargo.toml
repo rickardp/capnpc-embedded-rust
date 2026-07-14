@@ -24,7 +24,7 @@ include = [
 
 [dependencies]
 capnpc = "0.20"
-capnp = "0.20"
+capnp = "0.26"
 # WASM engine: wasmi is a pure-Rust interpreter — a lean build-dependency tree
 # and fast to compile, adequate for build-time schema compilation. The embedded
 # capnp.wasm is a plain MVP module (no exceptions, no atomics), so no engine
@@ -36,4 +36,4 @@ tempfile = "3"
 anyhow = "1"
 
 [dev-dependencies]
-capnp = "0.20"
+capnp = "0.26"
