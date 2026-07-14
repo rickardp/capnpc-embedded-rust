@@ -31,7 +31,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y cmake
       - name: Build embedded wasm
         run: capnpc-embedded/ci/build-wasm.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: capnp-wasm
           path: capnpc-embedded/assets/capnp.wasm
