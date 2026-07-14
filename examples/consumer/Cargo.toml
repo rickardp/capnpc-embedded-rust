@@ -1,0 +1,13 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+capnp = "0.20"
+
+[build-dependencies]
+capnpc-embedded = { path = "../.." }
+# We bring our own capnpc — capnpc-embedded doesn't depend on it.
+capnpc = "0.20"

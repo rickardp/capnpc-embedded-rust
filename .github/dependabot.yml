@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Our own Rust dependencies (wasmi, capnpc, ...).
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      wasmi:
+        patterns: ["wasmi*"]
+
+  # GitHub Actions used by our workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+# NOTE: Dependabot cannot track the upstream capnproto *release tag* (the event
+# that triggers a wasm rebuild). That is handled by .github/workflows/capnp-release-watch.yml.

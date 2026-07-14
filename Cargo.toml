@@ -1,0 +1,48 @@
+[package]
+name = "capnpc-embedded"
+# Version scheme: <our-semver>+<bundled-capnproto-version>.
+# The build metadata (after `+`) is informational only — Cargo ignores it for
+# resolution, so every release MUST bump the left (SemVer) side. See README.
+version = "0.2.0+1.4.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Compile Cap'n Proto schemas in build.rs with no system capnp and no C/C++ toolchain — the capnp compiler is embedded as WebAssembly and run in-process."
+repository = "https://github.com/rickardp/capnpc-embedded-rust"
+documentation = "https://docs.rs/capnpc-embedded"
+readme = "README.md"
+keywords = ["capnp", "capnproto", "codegen", "build-dependencies", "wasm"]
+categories = ["development-tools::build-utils", "encoding"]
+# Ship only what's needed for consumers (not the vendored patch, CI, or docs).
+include = [
+    "src/**/*.rs",
+    "build.rs",
+    "assets/capnp.wasm",
+    "assets/capnp-include/**/*.capnp",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+]
+
+[dependencies]
+# WASM engine: wasmi is a pure-Rust interpreter — a lean build-dependency tree
+# and fast to compile, adequate for build-time schema compilation. The embedded
+# capnp.wasm is a plain MVP module (no exceptions, no atomics), so no engine
+# feature flags are needed.
+#
+# Note: this crate does NOT depend on `capnpc`/`capnp`. It only runs the compiler
+# and returns the raw CodeGeneratorRequest; the caller feeds it to their own
+# chosen `capnpc` version. See the README.
+wasmi = "1.1"
+wasmi_wasi = "1.1"
+cap-std = "3"
+tempfile = "3"
+anyhow = "1"
+
+[dev-dependencies]
+# Only for the round-trip test: generate Rust from the request bytes and check it.
+capnpc = "0.20"
+
+[workspace]
+resolver = "2"
+members = ["examples/consumer"]

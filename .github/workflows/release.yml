@@ -1,0 +1,127 @@
+# Release workflow.
+#
+# Triggered by pushing a `v*` tag. The tag IS the gate — whoever pushes it is the
+# gatekeeper. Bump the version, commit, and `git tag v0.1.0 && git push --tags`.
+#
+# The crate version is `X.Y.Z+<capnp-version>` (SemVer + build metadata). Tags use
+# only the SemVer part, e.g. `v0.1.0` for version `0.1.0+1.4.0`.
+#
+# Pipeline:
+#   1. verify         — tag must match the SemVer part of the crate version.
+#   2. create-release — draft GitHub Release with generated notes.
+#   3. publish-crate  — build the embedded wasm, then idempotent `cargo publish`.
+#   4. finalize       — un-draft the release once publish succeeded.
+#
+# Idempotency: re-running on the same tag is safe. cargo publish treats an
+# already-uploaded version as success, and the release stays a draft until
+# finalize runs, so partial failures don't ship a half-baked release.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Verify tag matches Cargo.toml version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          # Crate version is X.Y.Z+<capnp>; compare the tag against the SemVer part.
+          FULL=$(sed -n '/^\[package\]/,/^\[/p' Cargo.toml \
+            | grep -m1 '^version' \
+            | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+          SEMVER="${FULL%%+*}"
+          echo "Tag:        $TAG"
+          echo "Cargo.toml: $FULL (semver $SEMVER)"
+          if [ -z "$SEMVER" ] || [ "$TAG" != "$SEMVER" ]; then
+            echo "::error::Tag ($TAG) does not match Cargo.toml SemVer ($SEMVER)"
+            exit 1
+          fi
+
+  create-release:
+    name: Create draft release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: true
+          generate_release_notes: true
+
+  publish-crate:
+    name: Publish to crates.io
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: publish-crate
+      - name: Build embedded wasm
+        # Produces assets/capnp.wasm (gitignored) so it ships in the .crate.
+        run: ci/build-wasm.sh
+      - name: Verify before publishing
+        run: cargo test -p capnpc-embedded
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # --allow-dirty: the freshly-built wasm and Cargo.lock aren't tracked.
+        # crates.io rejects duplicate versions; treat that as success so reruns
+        # of a partially-failed release are safe.
+        shell: bash
+        run: |
+          set +e
+          output=$(cargo publish -p capnpc-embedded --allow-dirty 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          if printf '%s' "$output" | grep -qE "already (exists|uploaded)"; then exit 0; fi
+          exit "$rc"
+      - name: Add crates.io link to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Link to the crate page rather than a versioned URL: published versions
+        # carry +build-metadata (0.1.0+1.4.0), which is awkward in a URL.
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" \
+            --notes "$(gh release view "${GITHUB_REF_NAME}" --json body -q .body)
+
+          crates.io: https://crates.io/crates/capnpc-embedded"
+
+  finalize-release:
+    name: Publish GitHub release
+    needs: publish-crate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Un-draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
