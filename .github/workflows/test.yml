@@ -27,7 +27,7 @@ jobs:
     name: Build capnp.wasm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y cmake
       - name: Build embedded wasm
         run: capnpc-embedded/ci/build-wasm.sh
@@ -54,7 +54,7 @@ jobs:
           - os: windows-latest
             label: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download embedded wasm
         uses: actions/download-artifact@v4
         with:
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     container: rust:alpine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download embedded wasm
         uses: actions/download-artifact@v4
         with:
