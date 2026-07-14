@@ -104,10 +104,18 @@ capnpc-embedded/ci/build-wasm.sh   # needs cmake; downloads wasi-sdk
 cargo test
 ```
 
+## Platforms
+
+Linux (glibc **and** musl), macOS, and Windows, on any CPU architecture — the
+same WebAssembly artifact everywhere. Every platform is exercised end-to-end in
+CI (including Alpine/musl).
+
 ## Limitations
 
 - Schema files and their imports must live on the local filesystem (they do, for
   a normal build). The compiler runs with a read-only view of the filesystem.
+- On Windows, all input schemas/imports must be on a single drive (the current
+  directory's drive) — normal for a project build.
 - Only the schema-compile path is supported (external `capnp` code-generator
   *plugins* are not — but `capnpc` generates Rust in-process, so this is not a
   limitation for Rust codegen).

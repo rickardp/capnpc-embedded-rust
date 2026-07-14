@@ -41,9 +41,6 @@ jobs:
     name: ${{ matrix.os }} (${{ matrix.label }})
     needs: build-wasm
     runs-on: ${{ matrix.os }}
-    # Windows is not yet supported (the WASI runner preopens `/` and uses Unix
-    # absolute paths); keep it visible but non-blocking until that's fixed.
-    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +53,6 @@ jobs:
             label: x86_64-unknown-linux-gnu
           - os: windows-latest
             label: x86_64-pc-windows-msvc
-            experimental: true
     steps:
       - uses: actions/checkout@v4
       - name: Download embedded wasm
