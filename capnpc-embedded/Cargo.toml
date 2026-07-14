@@ -23,7 +23,7 @@ include = [
 ]
 
 [dependencies]
-capnpc = "0.20"
+capnpc = "0.26"
 capnp = "0.20"
 # WASM engine: wasmi is a pure-Rust interpreter — a lean build-dependency tree
 # and fast to compile, adequate for build-time schema compilation. The embedded
