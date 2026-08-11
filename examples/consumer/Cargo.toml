@@ -10,4 +10,4 @@ capnp = "0.20"
 [build-dependencies]
 capnpc-embedded = { path = "../.." }
 # We bring our own capnpc — capnpc-embedded doesn't depend on it.
-capnpc = "0.20"
+capnpc = "0.27"
